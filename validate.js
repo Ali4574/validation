@@ -1,8 +1,9 @@
 const express = require('express');
 const Redis = require('ioredis');
+const fs = require('fs');
+
 const { AWS_REGION, REDIS_HOST, REDIS_PORT } = require("./config");
 
-// Replace with your Redis configuration
 const redis = new Redis({
   host: REDIS_HOST,
   port: REDIS_PORT,
@@ -12,30 +13,52 @@ const redis = new Redis({
 const app = express();
 app.use(express.json());
 
-// Utility function to ensure input is always treated as an array
-const normalizeToArray = (input) => (Array.isArray(input) ? input : [input]);
-
 // Add clientId and clientSecret to Redis
 app.post('/add-clients', async (req, res) => {
-    const clients = normalizeToArray(req.body); // Handle single or array input
+    const clients = Array.isArray(req.body) ? req.body : [req.body];
 
-    if (clients.length === 0) {
-        return res.status(400).json({ message: 'Invalid request: Send clientId & clientSecret or an array of them' });
+    if (clients.length === 0 || !clients[0].clientId || !clients[0].clientSecret) {
+        const errorMessage = { message: 'Invalid request: Send clientId and clientSecret or an array of such objects' };
+        logToFile({
+            timestamp: new Date().toISOString(),
+            action: 'add-clients',
+            status: 'failed',
+            details: errorMessage,
+        });
+        return res.status(400).json(errorMessage);
     }
 
     try {
         const results = await Promise.all(
             clients.map(async ({ clientId, clientSecret }) => {
                 if (!clientId || !clientSecret) {
-                    return { clientId, status: 'Invalid', reason: 'Missing clientId or clientSecret' };
+                    const result = { clientId, status: 'Invalid', reason: 'Missing clientId or clientSecret' };
+                    logToFile({
+                        timestamp: new Date().toISOString(),
+                        action: 'add-clients',
+                        result,
+                    });
+                    return result;
                 }
 
                 try {
                     await redis.set(clientId, JSON.stringify({ clientSecret }));
-                    return { clientId, status: 'Added' };
+                    const result = { clientId, status: 'Added' };
+                    logToFile({
+                        timestamp: new Date().toISOString(),
+                        action: 'add-clients',
+                        result,
+                    });
+                    return result;
                 } catch (error) {
+                    const result = { clientId, status: 'Failed', reason: 'Redis error' };
                     console.error('Redis set error:', error);
-                    return { clientId, status: 'Failed', reason: 'Redis error' };
+                    logToFile({
+                        timestamp: new Date().toISOString(),
+                        action: 'add-clients',
+                        result,
+                    });
+                    return result;
                 }
             })
         );
@@ -43,23 +66,46 @@ app.post('/add-clients', async (req, res) => {
         res.status(200).json(results);
     } catch (error) {
         console.error('Error processing request:', error);
+        logToFile({
+            timestamp: new Date().toISOString(),
+            action: 'add-clients',
+            status: 'failed',
+            reason: 'Internal server error',
+        });
         res.status(500).json({ message: 'Internal server error' });
     }
 });
 
-// Handle incoming requests for clientId and clientSecret validation
+// Handle incoming requests for single or multiple clientId and clientSecret validation
 app.post('/validate', async (req, res) => {
-    const clients = normalizeToArray(req.body); // Handle single or array input
+    const clients = Array.isArray(req.body) ? req.body : [req.body];
 
-    if (clients.length === 0) {
-        return res.status(400).json({ message: 'Invalid request: Send clientId & clientSecret or an array of them' });
+    if (clients.length === 0 || !clients[0].clientId || !clients[0].clientSecret) {
+        const errorMessage = { message: 'Invalid request: Provide clientId and clientSecret or an array of such objects' };
+        logToFile({
+            timestamp: new Date().toISOString(),
+            action: 'validate',
+            status: 'failed',
+            details: errorMessage,
+        });
+        return res.status(400).json(errorMessage);
     }
 
     try {
         const validationResults = await Promise.all(
             clients.map(async ({ clientId, clientSecret }) => {
                 if (!clientId || !clientSecret) {
-                    return { clientId, status: 'Invalid', reason: 'clientId and clientSecret are required' };
+                    const result = {
+                        clientId,
+                        status: 'Invalid',
+                        reason: 'clientId and clientSecret are required',
+                    };
+                    logToFile({
+                        timestamp: new Date().toISOString(),
+                        action: 'validate',
+                        result,
+                    });
+                    return result;
                 }
 
                 try {
@@ -69,14 +115,40 @@ app.post('/validate', async (req, res) => {
                         const { clientSecret: storedSecret } = JSON.parse(storedData);
 
                         if (storedSecret === clientSecret) {
-                            return { clientId, status: 'Valid' };
+                            const result = { clientId, status: 'Valid' };
+                            logToFile({
+                                timestamp: new Date().toISOString(),
+                                action: 'validate',
+                                result,
+                            });
+                            return result;
                         }
                     }
 
-                    return { clientId, status: 'Invalid', reason: 'clientSecret mismatch or clientId not found' };
+                    const result = {
+                        clientId,
+                        status: 'Invalid',
+                        reason: 'clientSecret mismatch or clientId not found',
+                    };
+                    logToFile({
+                        timestamp: new Date().toISOString(),
+                        action: 'validate',
+                        result,
+                    });
+                    return result;
                 } catch (error) {
+                    const result = {
+                        clientId,
+                        status: 'Invalid',
+                        reason: 'Internal server error',
+                    };
+                    logToFile({
+                        timestamp: new Date().toISOString(),
+                        action: 'validate',
+                        result,
+                    });
                     console.error('Error fetching data from Redis:', error);
-                    return { clientId, status: 'Invalid', reason: 'Internal server error' };
+                    return result;
                 }
             })
         );
@@ -84,9 +156,23 @@ app.post('/validate', async (req, res) => {
         res.status(200).json(validationResults);
     } catch (error) {
         console.error('Error processing request:', error);
+        logToFile({
+            timestamp: new Date().toISOString(),
+            action: 'validate',
+            status: 'failed',
+            reason: 'Internal server error',
+        });
         res.status(500).json({ message: 'Internal server error' });
     }
 });
+
+// Logging function
+function logToFile(logData) {
+    const logFile = 'validation-log.json';
+    fs.appendFile(logFile, JSON.stringify(logData, null, 2) + '\n', (err) => {
+        if (err) console.error('Error writing log to file:', err);
+    });
+}
 
 // Health check route
 app.get('/health', (req, res) => res.status(200).send('Server is healthy'));
