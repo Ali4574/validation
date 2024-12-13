@@ -1,11 +1,11 @@
 const express = require('express');
 const Redis = require('ioredis');
-
+const { AWS_REGION, REDIS_HOST, REDIS_PORT } = require("./config");
 // Replace with your Redis configuration
 const redis = new Redis({
-    host: 'rediscache-lxgaaf.serverless.aps1.cache.amazonaws.com',
-    port: 6379, // Default Redis port
-    tls: {} // Uncomment if using TLS
+    host: REDIS_HOST,
+    port: REDIS_PORT,
+    tls: {}, // Enable TLS
 });
 
 const app = express();
