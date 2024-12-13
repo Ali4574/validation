@@ -1,22 +1,26 @@
 const express = require('express');
 const Redis = require('ioredis');
 const { AWS_REGION, REDIS_HOST, REDIS_PORT } = require("./config");
+
 // Replace with your Redis configuration
 const redis = new Redis({
-    host: REDIS_HOST,
-    port: REDIS_PORT,
-    tls: {}, // Enable TLS
+  host: REDIS_HOST,
+  port: REDIS_PORT,
+  tls: {}, // Enable TLS
 });
 
 const app = express();
 app.use(express.json());
 
+// Utility function to ensure input is always treated as an array
+const normalizeToArray = (input) => (Array.isArray(input) ? input : [input]);
 
 // Add clientId and clientSecret to Redis
 app.post('/add-clients', async (req, res) => {
-    const clients = req.body; // Expecting array of clientId & clientSecret pairs
-    if (!Array.isArray(clients) || clients.length === 0) {
-        return res.status(400).json({ message: 'Invalid request: Send an array of clientId & clientSecret' });
+    const clients = normalizeToArray(req.body); // Handle single or array input
+
+    if (clients.length === 0) {
+        return res.status(400).json({ message: 'Invalid request: Send clientId & clientSecret or an array of them' });
     }
 
     try {
@@ -43,15 +47,14 @@ app.post('/add-clients', async (req, res) => {
     }
 });
 
-// Handle incoming requests for multiple clientId and clientSecret validation
+// Handle incoming requests for clientId and clientSecret validation
 app.post('/validate', async (req, res) => {
-    const clients = req.body; // Expecting a direct array of clientId and clientSecret pairs
+    const clients = normalizeToArray(req.body); // Handle single or array input
 
-    if (!Array.isArray(clients) || clients.length === 0) {
-        return res.status(400).json({ message: 'Invalid request: An array of clientId and clientSecret pairs is required' });
+    if (clients.length === 0) {
+        return res.status(400).json({ message: 'Invalid request: Send clientId & clientSecret or an array of them' });
     }
 
-    // Map over each pair and validate
     try {
         const validationResults = await Promise.all(
             clients.map(async ({ clientId, clientSecret }) => {
