@@ -1,13 +1,27 @@
 const express = require('express');
 const Redis = require('ioredis');
 const fs = require('fs');
+const { MongoClient } = require('mongodb');
 
-const { AWS_REGION, REDIS_HOST, REDIS_PORT } = require("./config");
+const { AWS_REGION, REDIS_HOST, REDIS_PORT, MONGO_URI, MONGO_DB_NAME } = require("./config");
 
 const redis = new Redis({
   host: REDIS_HOST,
   port: REDIS_PORT,
   tls: {}, // Enable TLS
+});
+
+const mongoClient = new MongoClient(MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
+
+let mongoDb;
+mongoClient.connect().then(client => {
+  mongoDb = client.db(MONGO_DB_NAME);
+  console.log("Connected to MongoDB Atlas");
+}).catch(err => {
+  console.error("Error connecting to MongoDB Atlas:", err);
 });
 
 const app = express();
@@ -93,7 +107,7 @@ app.post('/validate', async (req, res) => {
 
     try {
         const validationResults = await Promise.all(
-            clients.map(async ({ clientId, clientSecret }) => {
+            clients.map(async ({ clientId, clientSecret, ...additionalData }) => {
                 if (!clientId || !clientSecret) {
                     const result = {
                         clientId,
@@ -121,6 +135,19 @@ app.post('/validate', async (req, res) => {
                                 action: 'validate',
                                 result,
                             });
+
+                            // Store the validated data in MongoDB Atlas
+                            if (mongoDb) {
+                                await mongoDb.collection('validated_clients').insertOne({
+                                    clientId,
+                                    clientSecret,
+                                    ...additionalData,
+                                    validatedAt: new Date(),
+                                });
+                            } else {
+                                console.error('MongoDB client is not initialized');
+                            }
+
                             return result;
                         }
                     }
