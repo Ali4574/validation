@@ -143,6 +143,7 @@ app.post('/validate', async (req, res) => {
                                     clientSecret,
                                     ...additionalData,
                                     validatedAt: new Date(),
+                                    isQueue: false,
                                 });
                             } else {
                                 console.error('MongoDB client is not initialized');
